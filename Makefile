@@ -6,6 +6,8 @@ MM_DEBUG ?=
 GOPATH ?= $(shell go env GOPATH)
 GO_TEST_FLAGS ?= -race
 GO_BUILD_FLAGS ?=
+# Exclude npm dependencies, which can ship Go files (e.g. e2e-tests/*/node_modules).
+GO_PACKAGES = $(shell $(GO) list ./... | grep -v '/node_modules/')
 MM_UTILITIES_DIR ?= ../mattermost-utilities
 DLV_DEBUG_PORT := 2346
 DEFAULT_GOOS ?= $(shell go env GOOS)
@@ -100,7 +102,7 @@ apply:
 ## Install go tools
 install-go-tools:
 	@echo Installing go tools
-	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 	$(GO) install github.com/golang/mock/mockgen@v1.6.0
 	$(GO) install gotest.tools/gotestsum@v1.13.0
 	$(GO) install github.com/cortesi/modd/cmd/modd@v0.8
@@ -128,9 +130,9 @@ check-style-server: manifest-check apply install-go-tools
 # weird reports at golangci-lint step
 ifneq ($(HAS_SERVER),)
 	@echo Running golangci-lint
-	$(GO) vet ./...
+	$(GO) vet $(GO_PACKAGES)
 	$(GOBIN)/golangci-lint run ./...
-	$(GO) vet -vettool=$(GOBIN)/mattermost-govet -license -license.year=2020 -license.ignore=server/graphql/models.go ./...
+	$(GO) vet -vettool=$(GOBIN)/mattermost-govet -license -license.year=2020 -license.ignore=server/graphql/models.go $(GO_PACKAGES)
 endif
 
 ## Runs eslint and golangci-lint
@@ -178,9 +180,11 @@ ifneq ($(HAS_WEBAPP),)
 endif
 
 ## Ensures Cypress E2E NPM dependencies are installed without having to run this all the time.
+## --allow-git=all is required because npm 11.6+ blocks git dependencies by default and this
+## package uses pinned GitHub dependencies (eslint-plugin-mattermost, client-oauth2).
 e2e-tests/cypress/node_modules: $(wildcard e2e-tests/cypress/package.json)
 ifneq ($(HAS_WEBAPP),)
-	cd e2e-tests/cypress && $(NPM) install
+	cd e2e-tests/cypress && $(NPM) install --allow-git=all
 	touch $@
 endif
 
@@ -316,7 +320,7 @@ detach: setup-attach
 .PHONY: test
 test: apply webapp/node_modules install-go-tools
 ifneq ($(HAS_SERVER),)
-	$(GOBIN)/gotestsum --format standard-verbose --junitfile report.xml -- ./...
+	$(GOBIN)/gotestsum --format standard-verbose --junitfile report.xml -- $(GO_PACKAGES)
 endif
 ifneq ($(HAS_WEBAPP),)
 	cd webapp && $(NPM) run test;

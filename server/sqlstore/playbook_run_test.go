@@ -1781,7 +1781,6 @@ func NewBuilder(t testing.TB) *PlaybookRunBuilder {
 			TeamID:        model.NewId(),
 			ChannelID:     model.NewId(),
 			CreateAt:      model.GetMillis(),
-			DeleteAt:      0,
 			PostID:        model.NewId(),
 			PlaybookID:    model.NewId(),
 			Checklists:    nil,
