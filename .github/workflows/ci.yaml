@@ -183,7 +183,7 @@ jobs:
   # upstream lint job fails so the required check reports failure instead of
   # being skipped.
   lint:
-    if: always()
+    if: always() && github.repository == 'mattermost/mattermost-plugin-playbooks'
     runs-on: ubuntu-22.04
     needs:
       - lint-go
