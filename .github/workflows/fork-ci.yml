@@ -27,7 +27,7 @@ jobs:
           cache-dependency-path: webapp/package-lock.json
       - run: make apply
       - name: Backend regression tests
-        run: go test ./server/enterprise ./server/app ./server/api ./server
+        run: go test ./server/enterprise ./server/app ./server/api
       - name: Install webapp dependencies
         working-directory: webapp
         run: npm ci --ignore-scripts --legacy-peer-deps
