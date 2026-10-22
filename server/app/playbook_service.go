@@ -563,7 +563,7 @@ func (s *playbookService) Duplicate(playbook Playbook, userID string) (string, e
 
 // get top playbooks for teams
 func (s *playbookService) GetTopPlaybooksForTeam(teamID, userID string, opts *InsightsOpts) (*PlaybooksInsightsList, error) {
-	permissionFlag, err := licenseAndGuestCheck(s, userID, false)
+	permissionFlag, err := insightsGuestCheck(s, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -576,7 +576,7 @@ func (s *playbookService) GetTopPlaybooksForTeam(teamID, userID string, opts *In
 
 // get top playbooks for users
 func (s *playbookService) GetTopPlaybooksForUser(teamID, userID string, opts *InsightsOpts) (*PlaybooksInsightsList, error) {
-	permissionFlag, err := licenseAndGuestCheck(s, userID, true)
+	permissionFlag, err := insightsGuestCheck(s, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -587,10 +587,8 @@ func (s *playbookService) GetTopPlaybooksForUser(teamID, userID string, opts *In
 	return s.store.GetTopPlaybooksForUser(teamID, userID, opts)
 }
 
-func licenseAndGuestCheck(s *playbookService, userID string, isMyInsights bool) (bool, error) {
-	licenseError := errors.New("invalid license/authorization to use insights API")
+func insightsGuestCheck(s *playbookService, userID string) (bool, error) {
 	guestError := errors.New("Guests aren't authorized to use insights API")
-	lic := s.api.System.GetLicense()
 
 	user, err := s.api.User.Get(userID)
 	if err != nil {
@@ -599,14 +597,6 @@ func licenseAndGuestCheck(s *playbookService, userID string, isMyInsights bool) 
 
 	if user.IsGuest() {
 		return false, guestError
-	}
-
-	if lic == nil && !isMyInsights {
-		return false, licenseError
-	}
-
-	if !isMyInsights && (lic.SkuShortName != model.LicenseShortSkuProfessional && lic.SkuShortName != model.LicenseShortSkuEnterprise) {
-		return false, licenseError
 	}
 
 	return true, nil

@@ -7,64 +7,46 @@ import (
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 )
 
-type LicenseChecker struct {
-	pluginAPIClient *pluginapi.Client
+// LicenseChecker preserves the upstream capability interface. This fork enables
+// all plugin-owned features independently of the host server's subscription.
+// Authorization remains enforced by the API and PermissionsService.
+type LicenseChecker struct{}
+
+func NewLicenseChecker(_ *pluginapi.Client) *LicenseChecker {
+	return &LicenseChecker{}
 }
 
-func NewLicenseChecker(pluginAPIClient *pluginapi.Client) *LicenseChecker {
-	return &LicenseChecker{
-		pluginAPIClient,
-	}
+// PlaybookAllowed returns true for both public and private playbooks.
+func (e *LicenseChecker) PlaybookAllowed(_ bool) bool {
+	return true
 }
 
-// isAtLeastE20Licensed returns true when the server either has an E20 license or is configured for development.
-func (e *LicenseChecker) isAtLeastE20Licensed() bool {
-	config := e.pluginAPIClient.Configuration.GetConfig()
-	license := e.pluginAPIClient.System.GetLicense()
-
-	return pluginapi.IsE20LicensedOrDevelopment(config, license)
-}
-
-// isAtLeastE10Licensed returns true when the server either has at least an E10 license or is configured for development.
-func (e *LicenseChecker) isAtLeastE10Licensed() bool {
-	config := e.pluginAPIClient.Configuration.GetConfig()
-	license := e.pluginAPIClient.System.GetLicense()
-
-	return pluginapi.IsE10LicensedOrDevelopment(config, license)
-}
-
-// PlaybookAllowed returns true if the specified playbook is valid with the current license.
-func (e *LicenseChecker) PlaybookAllowed(isPlaybookPublic bool) bool {
-	// Private playbooks are E20-only
-	return e.isAtLeastE20Licensed() || isPlaybookPublic
-}
-
-// RetrospectiveAllowed returns true if the retrospective feature is allowed with the current license.
+// RetrospectiveAllowed returns true because retrospective is enabled in this fork.
 func (e *LicenseChecker) RetrospectiveAllowed() bool {
-	return e.isAtLeastE10Licensed()
+	return true
 }
 
-// TimelineAllowed returns true if the timeline feature is allowed with the current license.
+// TimelineAllowed returns true because timeline is enabled in this fork.
 func (e *LicenseChecker) TimelineAllowed() bool {
-	return e.isAtLeastE10Licensed()
+	return true
 }
 
-// StatsAllowed returns true if the stats feature is allowed with the current license.
+// StatsAllowed returns true because stats is enabled in this fork.
 func (e *LicenseChecker) StatsAllowed() bool {
-	return e.isAtLeastE20Licensed()
+	return true
 }
 
 // ChecklistItemDueDateAllowed returns true if setting/editing checklist item due date is allowed.
 func (e *LicenseChecker) ChecklistItemDueDateAllowed() bool {
-	return e.isAtLeastE10Licensed()
+	return true
 }
 
-// PlaybookAttributesAllowed returns true if the playbook attributes feature is allowed with the current license.
+// PlaybookAttributesAllowed returns true because playbook attributes is enabled in this fork.
 func (e *LicenseChecker) PlaybookAttributesAllowed() bool {
-	return e.isAtLeastE20Licensed()
+	return true
 }
 
-// ConditionalPlaybooksAllowed returns true if the conditional playbooks feature is allowed with the current license.
+// ConditionalPlaybooksAllowed returns true because conditional playbooks is enabled in this fork.
 func (e *LicenseChecker) ConditionalPlaybooksAllowed() bool {
-	return e.isAtLeastE20Licensed()
+	return true
 }

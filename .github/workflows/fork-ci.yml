@@ -1,0 +1,47 @@
+name: Fork checks and bundle
+on:
+  pull_request:
+  push:
+    branches: [master, 'r2d/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fork-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - run: make apply
+      - name: Backend regression tests
+        run: go test ./server/enterprise ./server/app ./server/api
+      - name: Install webapp dependencies
+        working-directory: webapp
+        run: npm ci --ignore-scripts --legacy-peer-deps
+      - name: Webapp tests and type checks
+        working-directory: webapp
+        run: |
+          npm run test -- --runInBand
+          npm run check-types
+          npx eslint src/license.ts src/edition_capabilities.test.ts
+      - name: Build Linux plugin bundle
+        run: make dist
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: playbooks-mm12-${{ github.sha }}
+          path: dist/playbooks-*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
