@@ -1,0 +1,98 @@
+name: release
+
+# Builds the plugin bundle whenever a release tag (vX.Y.Z or vX.Y.Z-rcN) is
+# pushed, then publishes it as a GitHub release. Can also be run manually
+# against an existing tag.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish (e.g. v2.6.2)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TERM: xterm
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build-and-release:
+    name: Build and publish plugin bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: ci/checkout-repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history and tags are required: the manifest tool derives the
+          # plugin version from the tag pointing at HEAD.
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: ci/setup-go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: ci/setup-node
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: ci/build-bundle
+        run: make dist
+
+      - name: ci/verify-bundle-version
+        run: |
+          built_version="$(./build/bin/manifest version)"
+          expected_version="${TAG#v}"
+          echo "Built plugin version: ${built_version}"
+          echo "Expected version:     ${expected_version}"
+          if [ "${built_version}" != "${expected_version}" ]; then
+            echo "::error::Built version (${built_version}) does not match tag (${TAG})"
+            exit 1
+          fi
+
+      - name: ci/upload-build-artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playbooks-bundle-${{ github.event.inputs.tag || github.ref_name }}
+          path: dist/playbooks-*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: ci/publish-github-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "${TAG}" in
+            *-rc*) prerelease="--prerelease" ;;
+          esac
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            # Release already exists (e.g. a retried workflow): replace the asset.
+            gh release upload "${TAG}" dist/playbooks-*.tar.gz --clobber
+          else
+            gh release create "${TAG}" dist/playbooks-*.tar.gz \
+              --title "${TAG}" \
+              --generate-notes \
+              ${prerelease}
+          fi
