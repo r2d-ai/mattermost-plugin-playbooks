@@ -23,14 +23,9 @@ const isValidSkuShortName = (license: Record<string, string>) => {
     }
 };
 
-// isEnterpriseLicensedOrDevelopment returns true when the server is licensed with minimum Mattermost
-// Enterprise License, or has `EnableDeveloper` and `EnableTesting`
-// configuration settings enabled, signaling a non-production, developer mode.
-export const isEnterpriseLicensedOrDevelopment = (state: GlobalState): boolean => {
-    const license = getLicense(state);
-
-    return checkEnterpriseLicensed(license) || isConfiguredForDevelopment(state);
-};
+// This fork enables plugin-owned enterprise capabilities on every server edition.
+// Keep the selector signature for upstream callers; this is not an authorization check.
+export const isEnterpriseLicensedOrDevelopment = (_state: GlobalState): boolean => true;
 
 export const checkEnterpriseLicensed = (license: Record<string, string>) => {
     if ([enterprise, entry, enterpriseAdvanced].includes(license?.SkuShortName)) {
@@ -48,14 +43,8 @@ export const checkEnterpriseLicensed = (license: Record<string, string>) => {
     return false;
 };
 
-// isProfressionalLicensedOrDevelopment returns true when the server is at least licensed with a Mattermost Professional License,
-// or has `EnableDeveloper` and `EnableTesting` configuration settings enabled,
-// signaling a non-production, developer mode.
-export const isProfessionalLicensedOrDevelopment = (state: GlobalState): boolean => {
-    const license = getLicense(state);
-
-    return checkProfessionalLicensed(license) || isConfiguredForDevelopment(state);
-};
+// Plugin-owned professional capabilities are also available without a host license.
+export const isProfessionalLicensedOrDevelopment = (_state: GlobalState): boolean => true;
 
 export const checkProfessionalLicensed = (license: Record<string, string>) => {
     if ([professional, enterprise, entry, enterpriseAdvanced].includes(license?.SkuShortName)) {

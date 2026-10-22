@@ -109,13 +109,6 @@ func (p *Plugin) OnActivate() error {
 	pluginAPIClient := pluginapi.NewClient(p.API, p.Driver)
 	p.pluginAPI = pluginAPIClient
 
-	if !pluginapi.IsE10LicensedOrDevelopment(
-		pluginAPIClient.Configuration.GetConfig(),
-		pluginAPIClient.System.GetLicense(),
-	) {
-		return errors.New("this plugin requires a professional license or higher")
-	}
-
 	p.config = config.NewConfigService(pluginAPIClient, manifest)
 
 	pluginapi.ConfigureLogrus(logrus.StandardLogger(), pluginAPIClient)

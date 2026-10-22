@@ -17,6 +17,9 @@ env:
 
 jobs:
   buildenv:
+    # Upstream CI uses private Mattermost services and license secrets.
+    # Fork validation is handled by fork-ci.yml without those dependencies.
+    if: github.repository == 'mattermost/mattermost-plugin-playbooks'
     name: Build Environment
     runs-on: ubuntu-22.04
     outputs:
@@ -755,7 +758,7 @@ jobs:
         uses: ./.github/actions/playwright-e2e-test
 
   report-test-results:
-    if: always() && github.event.pull_request.head.repo.full_name == github.repository
+    if: always() && github.repository == 'mattermost/mattermost-plugin-playbooks' && github.event.pull_request.head.repo.full_name == github.repository
     needs:
       - e2e-cypress-tests
       - e2e-cypress-tests-fips
