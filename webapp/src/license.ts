@@ -25,7 +25,7 @@ const isValidSkuShortName = (license: Record<string, string>) => {
 
 // This fork enables plugin-owned enterprise capabilities on every server edition.
 // Keep the selector signature for upstream callers; this is not an authorization check.
-export const isEnterpriseLicensedOrDevelopment = (_state: GlobalState): boolean => true;
+export const isEnterpriseLicensedOrDevelopment: (state: GlobalState) => boolean = () => true;
 
 export const checkEnterpriseLicensed = (license: Record<string, string>) => {
     if ([enterprise, entry, enterpriseAdvanced].includes(license?.SkuShortName)) {
@@ -44,7 +44,7 @@ export const checkEnterpriseLicensed = (license: Record<string, string>) => {
 };
 
 // Plugin-owned professional capabilities are also available without a host license.
-export const isProfessionalLicensedOrDevelopment = (_state: GlobalState): boolean => true;
+export const isProfessionalLicensedOrDevelopment: (state: GlobalState) => boolean = () => true;
 
 export const checkProfessionalLicensed = (license: Record<string, string>) => {
     if ([professional, enterprise, entry, enterpriseAdvanced].includes(license?.SkuShortName)) {
