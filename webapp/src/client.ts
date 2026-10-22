@@ -10,6 +10,7 @@ import {Client4} from 'mattermost-redux/client';
 import {ClientError} from '@mattermost/client';
 import {getCurrentChannel} from 'mattermost-redux/selectors/entities/channels';
 
+import {ApprovalGate} from 'src/types/approval_gates';
 import {
     FetchPlaybookRunsParams,
     FetchPlaybookRunsReturn,
@@ -81,6 +82,35 @@ export async function fetchPlaybookRun(id: string) {
     const data = await doGet(`${apiUrl}/runs/${id}`);
 
     return data as PlaybookRun;
+}
+
+const isApprovalGate = (value: unknown): value is ApprovalGate => {
+    if (typeof value !== 'object' || value === null) {
+        return false;
+    }
+
+    return 'gate_id' in value && typeof value.gate_id === 'string' &&
+        'title' in value && typeof value.title === 'string' &&
+        'path' in value && typeof value.path === 'string' &&
+        value.path.startsWith('/office?page=%2Fwork%2Fapprovals%2F') &&
+        'can_review' in value && typeof value.can_review === 'boolean' &&
+        'status' in value && (
+        value.status === 'pending' || value.status === 'approved' ||
+        value.status === 'rejected' || value.status === 'returned' || value.status === 'cancelled'
+    );
+};
+
+export async function fetchRunApprovalGates(runID: string, signal?: AbortSignal): Promise<ApprovalGate[]> {
+    const {data} = await doFetchWithResponse<unknown>(`${apiUrl}/runs/${encodeURIComponent(runID)}/approval-gates`, {
+        method: 'get',
+        signal,
+    });
+
+    if (!Array.isArray(data) || !data.every(isApprovalGate)) {
+        throw new Error('Invalid approval gates response');
+    }
+
+    return data;
 }
 
 export async function fetchPlaybookRunStatusUpdates(id: string) {

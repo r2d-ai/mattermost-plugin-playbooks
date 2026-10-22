@@ -7,6 +7,7 @@ import renderer from 'react-test-renderer';
 import {emptyChecklistItem} from 'src/types/playbook';
 
 import ChecklistList from './checklist_list';
+import ApprovalGates from './approval_gates';
 
 // --- Mocks ---
 
@@ -89,6 +90,7 @@ jest.mock('./collapsible_checklist', () => ({
 }));
 
 jest.mock('./multi_select_action_bar', () => ({__esModule: true, default: () => null}));
+jest.mock('./approval_gates', () => ({__esModule: true, default: () => null}));
 
 jest.mock('src/components/checklist_item/checklist_item', () => ({
     ButtonsFormat: {Compact: 'compact'},
@@ -184,5 +186,13 @@ describe('ChecklistList propertyFields resolution', () => {
 
         expect(mockUsePlaybookAttributes).toHaveBeenCalledWith('pb-1');
         expect(capturedProps?.propertyFields).toEqual([userField]);
+    });
+
+    it('includes Office approvals only for a run', () => {
+        const runView = renderList({playbookRun: makeRun({update_at: 123})});
+        expect(runView.root.findByType(ApprovalGates).props).toEqual({runID: 'run-1', updatedAt: 123});
+
+        const templateView = renderList({playbook: makePlaybook()});
+        expect(templateView.root.findAllByType(ApprovalGates)).toEqual([]);
     });
 });

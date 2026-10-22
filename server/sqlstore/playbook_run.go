@@ -585,6 +585,10 @@ func (s *playbookRunStore) UpdatePlaybookRun(playbookRun *app.PlaybookRun) (*app
 	}
 	defer s.store.finalizeTransaction(tx)
 
+	if err = protectOfficeGateMutation(tx, rawPlaybookRun.ID, rawPlaybookRun.ChecklistsJSON, false); err != nil {
+		return nil, err
+	}
+
 	// When adding a PlaybookRun column #3: add to this SetMap (if it is a column that can be updated)
 	_, err = s.store.execBuilder(tx, sq.
 		Update("IR_Incident").
@@ -660,7 +664,15 @@ func (s *playbookRunStore) UpdateStatus(statusPost *app.SQLStatusPost) error {
 }
 
 func (s *playbookRunStore) FinishPlaybookRun(playbookRunID string, endAt int64) error {
-	if _, err := s.store.execBuilder(s.store.db, sq.
+	tx, err := s.store.db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer s.store.finalizeTransaction(tx)
+	if err := protectOfficeGateMutation(tx, playbookRunID, nil, true); err != nil {
+		return err
+	}
+	if _, err := s.store.execBuilder(tx, sq.
 		Update("IR_Incident").
 		SetMap(map[string]interface{}{
 			"CurrentStatus": app.StatusFinished,
@@ -672,7 +684,7 @@ func (s *playbookRunStore) FinishPlaybookRun(playbookRunID string, endAt int64) 
 		return errors.Wrapf(err, "failed to finish run for id '%s'", playbookRunID)
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 func (s *playbookRunStore) RestorePlaybookRun(playbookRunID string, restoredAt int64) error {
@@ -998,7 +1010,7 @@ func (s *playbookRunStore) NukeDB() (err error) {
 	}
 	defer s.store.finalizeTransaction(tx)
 
-	if _, err := tx.Exec("DROP TABLE IF EXISTS IR_Condition, IR_Metric, IR_MetricConfig, IR_PlaybookMember, IR_Run_Participants, IR_PlaybookAutoFollow, IR_StatusPosts, IR_TimelineEvent, IR_Incident, IR_Playbook, IR_System"); err != nil {
+	if _, err := tx.Exec("DROP TABLE IF EXISTS IR_OfficeGate, IR_OfficeOperation, IR_Condition, IR_Metric, IR_MetricConfig, IR_PlaybookMember, IR_Run_Participants, IR_PlaybookAutoFollow, IR_StatusPosts, IR_TimelineEvent, IR_Incident, IR_Playbook, IR_System"); err != nil {
 		return errors.Wrap(err, "could not delete all IR tables")
 	}
 
@@ -1293,7 +1305,7 @@ func (s *playbookRunStore) GetRunsWithAssignedTasks(userID string) ([]app.Assign
 		// Check which item(s) have this user as an assignee and add them to the list
 		for _, checklist := range checklists {
 			for _, item := range checklist.Items {
-				if item.AssigneeID == userID && item.State == "" {
+				if item.AssigneeID == userID && (item.State == app.ChecklistItemStateOpen || item.State == app.ChecklistItemStateInProgress) {
 					task := app.AssignedTask{
 						ChecklistID:    checklist.ID,
 						ChecklistTitle: checklist.Title,
@@ -1664,7 +1676,15 @@ func (s *playbookRunStore) GraphqlUpdate(id string, setmap map[string]interface{
 		return errors.New("id should not be empty")
 	}
 
-	_, err := s.store.execBuilder(s.store.db, sq.
+	tx, err := s.store.db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer s.store.finalizeTransaction(tx)
+	if err := protectOfficeGateGraphqlMutation(tx, id, setmap); err != nil {
+		return err
+	}
+	_, err = s.store.execBuilder(tx, sq.
 		Update("IR_Incident").
 		SetMap(setmap).
 		Where(sq.Eq{"ID": id}))
@@ -1673,7 +1693,7 @@ func (s *playbookRunStore) GraphqlUpdate(id string, setmap map[string]interface{
 		return errors.Wrapf(err, "failed to update playbook run with id '%s'", id)
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 func toSQLPlaybookRun(playbookRun app.PlaybookRun) (*sqlPlaybookRun, error) {

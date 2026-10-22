@@ -183,7 +183,7 @@ func (p *Plugin) OnActivate() error {
 
 	p.licenseChecker = enterprise.NewLicenseChecker(pluginAPIClient)
 
-	p.playbookRunService = app.NewPlaybookRunService(
+	runService := app.NewPlaybookRunService(
 		pluginAPIClient,
 		playbookRunStore,
 		p.bot,
@@ -197,6 +197,10 @@ func (p *Plugin) OnActivate() error {
 		p.propertyService,
 		p.conditionService,
 	)
+	p.playbookRunService = runService
+	officeGateStore := sqlstore.NewOfficeGateStore(sqlStore)
+	runService.SetOfficeGateStore(officeGateStore)
+	officeRuns := app.NewOfficeRunService(sqlstore.NewOfficeOperationStore(sqlStore), app.NewOfficeRunBackend(runService))
 
 	if err = scheduler.SetCallback(p.playbookRunService.HandleReminder); err != nil {
 		logrus.WithError(err).Error("JobOnceScheduler could not add the playbookRunService's HandleReminder")
@@ -218,6 +222,7 @@ func (p *Plugin) OnActivate() error {
 	mutex.Unlock()
 
 	p.permissions = app.NewPermissionsService(p.playbookService, p.playbookRunService, pluginAPIClient, p.config, p.licenseChecker)
+	api.NewOfficeHandler(p.handler, pluginAPIClient, p.permissions, p.playbookRunService, officeRuns, officeGateStore)
 
 	api.NewGraphQLHandler(
 		p.handler.APIRouter,

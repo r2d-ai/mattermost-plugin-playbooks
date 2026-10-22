@@ -191,6 +191,18 @@ type PlaybookRunServiceImpl struct {
 	metricsService   *metrics.Metrics
 	propertyService  PropertyService
 	conditionService ConditionService
+	officeGates      OfficeGateStore
+}
+
+func (s *PlaybookRunServiceImpl) SetOfficeGateStore(store OfficeGateStore) {
+	s.officeGates = store
+}
+
+func (s *PlaybookRunServiceImpl) checkOfficeTask(runID, taskID string) error {
+	if s.officeGates == nil {
+		return nil
+	}
+	return s.officeGates.BlocksTask(runID, taskID)
 }
 
 var allNonSpaceNonWordRegex = regexp.MustCompile(`[^\w\s]`)
@@ -421,6 +433,10 @@ func normalizeAndValidateRunCreationParams(playbookRun *PlaybookRun, pb *Playboo
 // consumed. CreatePlaybookRun always allocates the sequential identifier itself, so callers
 // cannot inject a pre-set RunNumber or SequentialID.
 func (s *PlaybookRunServiceImpl) CreatePlaybookRun(playbookRun *PlaybookRun, pb *Playbook, userID string, public bool, source string, initialPropertyValues map[string]json.RawMessage) (*PlaybookRun, error) {
+	return s.createPlaybookRun(playbookRun, pb, userID, public, source, initialPropertyValues, nil)
+}
+
+func (s *PlaybookRunServiceImpl) createPlaybookRun(playbookRun *PlaybookRun, pb *Playbook, userID string, public bool, source string, initialPropertyValues map[string]json.RawMessage, prepared *OfficePreparedRun) (*PlaybookRun, error) {
 	auditRec := plugin.MakeAuditRecord("createPlaybookRun", model.AuditStatusFail)
 	defer s.api.LogAuditRec(auditRec)
 
@@ -434,50 +450,55 @@ func (s *PlaybookRunServiceImpl) CreatePlaybookRun(playbookRun *PlaybookRun, pb 
 		model.AddEventParameterAuditableToAuditRec(auditRec, "playbook", *pb)
 	}
 
-	if err := normalizeAndValidateRunCreationParams(playbookRun, pb); err != nil {
-		return nil, err
-	}
-
-	if playbookRun.DefaultOwnerID != "" {
-		// Check if the user is a member of the team to which the playbook run belongs.
-		if !IsMemberOfTeam(playbookRun.DefaultOwnerID, playbookRun.TeamID, s.pluginAPI) {
-			logrus.WithFields(logrus.Fields{
-				"user_id": playbookRun.DefaultOwnerID,
-				"team_id": playbookRun.TeamID,
-			}).Warn("default owner specified, but it is not a member of the playbook run's team")
-		} else {
-			playbookRun.OwnerUserID = playbookRun.DefaultOwnerID
-		}
-	}
-	if playbookRun.OwnerUserID == "" {
-		playbookRun.OwnerUserID = userID
-	}
-
-	playbookRun.ReporterUserID = userID
-	playbookRun.ID = model.NewId()
-
-	logger := logrus.WithField("playbook_run_id", playbookRun.ID)
-
-	if playbookRun.Type != RunTypePlaybook && playbookRun.Type != RunTypeChannelChecklist {
-		return nil, errors.Wrap(ErrMalformedPlaybookRun, "invalid run type")
-	}
-
-	// Resolve owner before any allocation so {OWNER} resolves from fresh data even if the
-	// caller skipped ResolveRunCreationParams.
-	if pb != nil {
-		s.resolveOwner(playbookRun, logger)
-	}
-
-	// Allocate the sequential identifier server-side. This is the sole allocation point so no
-	// caller can inject a pre-set RunNumber / SequentialID.
 	var channelDisplayName string
-	if pb != nil {
-		var allocErr error
-		channelDisplayName, allocErr = s.resolveAndAllocate(playbookRun, pb, initialPropertyValues, source)
-		if allocErr != nil {
-			return nil, allocErr
+	if prepared == nil {
+		if err := normalizeAndValidateRunCreationParams(playbookRun, pb); err != nil {
+			return nil, err
 		}
+
+		if playbookRun.DefaultOwnerID != "" {
+			// Check if the user is a member of the team to which the playbook run belongs.
+			if !IsMemberOfTeam(playbookRun.DefaultOwnerID, playbookRun.TeamID, s.pluginAPI) {
+				logrus.WithFields(logrus.Fields{
+					"user_id": playbookRun.DefaultOwnerID,
+					"team_id": playbookRun.TeamID,
+				}).Warn("default owner specified, but it is not a member of the playbook run's team")
+			} else {
+				playbookRun.OwnerUserID = playbookRun.DefaultOwnerID
+			}
+		}
+		if playbookRun.OwnerUserID == "" {
+			playbookRun.OwnerUserID = userID
+		}
+
+		playbookRun.ReporterUserID = userID
+		playbookRun.ID = model.NewId()
+
+		logger := logrus.WithField("playbook_run_id", playbookRun.ID)
+
+		if playbookRun.Type != RunTypePlaybook && playbookRun.Type != RunTypeChannelChecklist {
+			return nil, errors.Wrap(ErrMalformedPlaybookRun, "invalid run type")
+		}
+
+		// Resolve owner before any allocation so {OWNER} resolves from fresh data even if the
+		// caller skipped ResolveRunCreationParams.
+		if pb != nil {
+			s.resolveOwner(playbookRun, logger)
+		}
+
+		// Allocate the sequential identifier server-side. This is the sole allocation point so no
+		// caller can inject a pre-set RunNumber / SequentialID.
+		if pb != nil {
+			var allocErr error
+			channelDisplayName, allocErr = s.resolveAndAllocate(playbookRun, pb, initialPropertyValues, source)
+			if allocErr != nil {
+				return nil, allocErr
+			}
+		}
+	} else {
+		channelDisplayName = prepared.ChannelDisplayName
 	}
+	logger := logrus.WithField("playbook_run_id", playbookRun.ID)
 
 	var err error
 	var channel *model.Channel
@@ -492,7 +513,11 @@ func (s *PlaybookRunServiceImpl) CreatePlaybookRun(playbookRun *PlaybookRun, pb 
 				pb.Title, playbookURL, overviewURL)
 		}
 
-		channel, err = s.createPlaybookRunChannel(playbookRun, header, public, channelDisplayName)
+		if prepared != nil {
+			channel, err = s.officeRunChannel(prepared)
+		} else {
+			channel, err = s.createPlaybookRunChannel(playbookRun, header, public, channelDisplayName)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -519,6 +544,15 @@ func (s *PlaybookRunServiceImpl) CreatePlaybookRun(playbookRun *PlaybookRun, pb 
 			if err = s.permissions.ChannelManageMembers(userID, channel.Id); err != nil {
 				return nil, errors.Wrap(err, "unable to assign run owner")
 			}
+		}
+	}
+
+	if prepared != nil {
+		if err = s.addPlaybookRunInitialChannelMemberships(playbookRun, channel, createdChannel); err != nil {
+			return nil, err
+		}
+		if err = s.addOfficeInvitedChannelMembers(playbookRun); err != nil {
+			return nil, err
 		}
 	}
 
@@ -558,10 +592,12 @@ func (s *PlaybookRunServiceImpl) CreatePlaybookRun(playbookRun *PlaybookRun, pb 
 		}
 	}
 
-	now := model.GetMillis()
-	playbookRun.CreateAt = now
-	playbookRun.LastStatusUpdateAt = now
-	playbookRun.CurrentStatus = StatusInProgress
+	if prepared == nil {
+		now := model.GetMillis()
+		playbookRun.CreateAt = now
+		playbookRun.LastStatusUpdateAt = now
+		playbookRun.CurrentStatus = StatusInProgress
+	}
 
 	// Start with a blank playbook with one empty checklist if one isn't provided
 	if playbookRun.PlaybookID == "" {
@@ -582,8 +618,13 @@ func (s *PlaybookRunServiceImpl) CreatePlaybookRun(playbookRun *PlaybookRun, pb 
 		auditRec.AddErrorDesc(err.Error())
 		return nil, err
 	}
+	if prepared != nil {
+		if err = NewOfficeRunBackend(s).ensureOfficeRunSetup(playbookRun, prepared); err != nil {
+			return nil, err
+		}
+	}
 
-	if pb != nil && s.licenseChecker.PlaybookAttributesAllowed() {
+	if prepared == nil && pb != nil && s.licenseChecker.PlaybookAttributesAllowed() {
 		propertyCopyResult, err := s.propertyService.CopyPlaybookPropertiesToRun(pb.ID, playbookRun.ID)
 		if err != nil {
 			logger.WithError(err).Warn("failed to copy playbook properties to run")
@@ -736,7 +777,11 @@ func (s *PlaybookRunServiceImpl) CreatePlaybookRun(playbookRun *PlaybookRun, pb 
 		}
 
 		// dm to users who are auto-following the playbook
-		err = s.dmPostToAutoFollows(&model.Post{Message: message}, pb.ID, playbookRun.ID, userID)
+		if prepared != nil {
+			s.dmOfficeAutoFollowers(prepared.AutoFollowUserIDs, message, playbookRun, userID)
+		} else {
+			err = s.dmPostToAutoFollows(&model.Post{Message: message}, pb.ID, playbookRun.ID, userID)
+		}
 		if err != nil {
 			logger.WithError(err).Error("failed to dm post to auto follows")
 		}
@@ -750,15 +795,19 @@ func (s *PlaybookRunServiceImpl) CreatePlaybookRun(playbookRun *PlaybookRun, pb 
 		SubjectUserID: playbookRun.ReporterUserID,
 	}
 
-	if _, err = s.store.CreateTimelineEvent(event); err != nil {
-		err := errors.Wrap(err, "failed to create timeline event")
-		auditRec.AddErrorDesc(err.Error())
-		return nil, err
+	if prepared == nil {
+		if _, err = s.store.CreateTimelineEvent(event); err != nil {
+			err := errors.Wrap(err, "failed to create timeline event")
+			auditRec.AddErrorDesc(err.Error())
+			return nil, err
+		}
+	} else {
+		event = OfficeRunCreatedEvent(playbookRun)
 	}
 	playbookRun.TimelineEvents = append(playbookRun.TimelineEvents, *event)
 
-	//auto-follow playbook run
-	if pb != nil {
+	// Office followers are part of the durable initial audience.
+	if pb != nil && prepared == nil {
 		var autoFollows []string
 		autoFollows, err = s.playbookService.GetAutoFollows(pb.ID)
 		if err != nil {
@@ -3052,6 +3101,9 @@ func (s *PlaybookRunServiceImpl) RunChecklistItemSlashCommand(playbookRunID, use
 	}
 
 	itemToRun := playbookRun.Checklists[checklistNumber].Items[itemNumber]
+	if err = s.checkOfficeTask(playbookRunID, itemToRun.ID); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(itemToRun.Command) == "" {
 		return "", errors.New("no slash command associated with this checklist item")
 	}
@@ -3140,6 +3192,9 @@ func (s *PlaybookRunServiceImpl) DuplicateChecklistItem(playbookRunID, userID st
 	}
 
 	checklistItem := playbookRunToModify.Checklists[checklistNumber].Items[itemNumber]
+	if err = s.checkOfficeTask(playbookRunID, checklistItem.ID); err != nil {
+		return err
+	}
 	checklistItem.ID = ""
 	updateChecklistAndItemTimestamp(&playbookRunToModify.Checklists[checklistNumber], &checklistItem, 0)
 
@@ -3237,6 +3292,11 @@ func (s *PlaybookRunServiceImpl) DuplicateChecklist(playbookRunID, userID string
 	}
 
 	duplicate := playbookRunToModify.Checklists[checklistNumber].Clone()
+	for _, item := range duplicate.Items {
+		if err = s.checkOfficeTask(playbookRunID, item.ID); err != nil {
+			return err
+		}
+	}
 
 	// Clear IDs so populateChecklistIDs will generate new ones to prevent conflicts
 	duplicate.ID = ""
@@ -4139,6 +4199,19 @@ func (s *PlaybookRunServiceImpl) createPlaybookRunChannel(playbookRun *PlaybookR
 
 // addPlaybookRunInitialMemberships creates the memberships in run and channels for the most core users: playbooksbot, reporter and owner
 func (s *PlaybookRunServiceImpl) addPlaybookRunInitialMemberships(playbookRun *PlaybookRun, channel *model.Channel, createdChannel bool) error {
+	if err := s.addPlaybookRunInitialChannelMemberships(playbookRun, channel, createdChannel); err != nil {
+		return err
+	}
+	// Run participants are registered after the run row exists.
+	participants := []string{playbookRun.OwnerUserID}
+	if playbookRun.OwnerUserID != playbookRun.ReporterUserID {
+		participants = append(participants, playbookRun.ReporterUserID)
+	}
+	_, err := s.AddParticipants(playbookRun.ID, participants, playbookRun.ReporterUserID, false, true)
+	return err
+}
+
+func (s *PlaybookRunServiceImpl) addPlaybookRunInitialChannelMemberships(playbookRun *PlaybookRun, channel *model.Channel, createdChannel bool) error {
 	// For DM/GM channels, skip team/channel member operations since:
 	// 1. DM/GM channels have no team (TeamId is empty)
 	// 2. Members are implicit in the DM/GM - we can't add/remove them
@@ -4176,15 +4249,6 @@ func (s *PlaybookRunServiceImpl) addPlaybookRunInitialMemberships(playbookRun *P
 		}
 	}
 
-	// run related - still add participants for tracking purposes even in DM/GM
-	participants := []string{playbookRun.OwnerUserID}
-	if playbookRun.OwnerUserID != playbookRun.ReporterUserID {
-		participants = append(participants, playbookRun.ReporterUserID)
-	}
-	_, err := s.AddParticipants(playbookRun.ID, participants, playbookRun.ReporterUserID, false, true)
-	if err != nil {
-		return errors.Wrap(err, "failed to add owner/reporter as a participant")
-	}
 	return nil
 }
 
@@ -5882,6 +5946,11 @@ func (s *PlaybookRunServiceImpl) SetRunPropertyValue(userID, playbookRunID, prop
 		}
 	}
 
+	if !s.propertyValuesEqual(propertyField, currentValue, value) {
+		if err = s.checkOfficePropertyChange(userID, run, propertyFieldID, parentFieldID); err != nil {
+			return nil, err
+		}
+	}
 	propertyValue, err := s.propertyService.UpsertRunPropertyValue(playbookRunID, propertyFieldID, value)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to upsert property value")

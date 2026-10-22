@@ -49,6 +49,7 @@ import {getDistinctAssignees} from 'src/utils';
 import CollapsibleChecklist, {ChecklistInputComponent, TitleHelpTextWrapper} from './collapsible_checklist';
 import GenericChecklist, {generateKeys} from './generic_checklist';
 import MultiSelectActionBar from './multi_select_action_bar';
+import ApprovalGates from './approval_gates';
 
 // Helper function to check if a task is adjacent to other tasks in its condition group
 const isTaskAdjacentToConditionGroup = (
@@ -693,6 +694,13 @@ const ChecklistList = ({
                 </Droppable>
                 {!readOnly && addChecklist}
             </DragDropContext>
+            {playbookRun && (
+                <ApprovalGates
+                    key={playbookRun.id}
+                    runID={playbookRun.id}
+                    updatedAt={playbookRun.update_at}
+                />
+            )}
             {bulkEditMode && selectedItems.size === 0 && (
                 <BulkEditInfoToast>
                     <i className='icon icon-information-outline'/>

@@ -4,16 +4,22 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/mattermost/mattermost-plugin-playbooks/server/app"
 	"github.com/sirupsen/logrus"
 )
 
 type ErrorHandler struct {
 }
 
-// HandleError logs the internal error and sends a generic error as JSON in a 500 response.
+// HandleError reports expected approval conflicts without treating them as outages.
 func (h *ErrorHandler) HandleError(w http.ResponseWriter, logger logrus.FieldLogger, internalErr error) {
+	if errors.Is(internalErr, app.ErrOfficeBlocked) {
+		h.HandleErrorWithCode(w, logger, http.StatusConflict, "Office approval is required before changing this task or finishing the run.", internalErr)
+		return
+	}
 	h.HandleErrorWithCode(w, logger, http.StatusInternalServerError, "An internal error has occurred. Check app server logs for details.", internalErr)
 }
 

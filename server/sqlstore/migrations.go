@@ -1809,4 +1809,14 @@ var migrations = []Migration{
 			return nil
 		},
 	},
+	{
+		fromVersion: semver.MustParse("0.69.0"),
+		toVersion:   semver.MustParse("0.70.0"),
+		migrationFunc: func(e sqlx.Ext, sqlStore *SQLStore) error {
+			if err := createOfficeOperationTables(e); err != nil {
+				return errors.Wrap(err, "failed creating Office operations")
+			}
+			return CreateOfficeGateTables(e)
+		},
+	},
 }
